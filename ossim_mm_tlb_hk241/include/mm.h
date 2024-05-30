@@ -91,7 +91,6 @@
 /* Memory range operator */
 #define INCLUDE(x1,x2,y1,y2) (((y1-x1)*(x2-y2)>=0)?1:0)
 #define OVERLAP(x1,x2,y1,y2) (((y2-x1)*(x2-y1)>=0)?1:0)
-#define TLB_ENTRY_SIZE 9
 
 /* VM region prototypes */
 struct vm_rg_struct * init_vm_rg(int rg_start, int rg_endi);
@@ -130,9 +129,10 @@ int TLBMEMPHY_read(struct memphy_struct * mp, int addr, BYTE *value);
 int TLBMEMPHY_write(struct memphy_struct * mp, int addr, BYTE data);
 int TLBMEMPHY_dump(struct memphy_struct * mp);
 
-int tlb_cache_read(struct memphy_struct *mp, int pid, int pgnum, BYTE *value);
-int tlb_cache_write(struct memphy_struct *mp, int pid, int pgnum, BYTE *value);
+int tlb_cache_read(struct memphy_struct *mp, int pid, int pgnum, int *value);
+int tlb_cache_write(struct memphy_struct *mp, int pid, int pgnum, int *value);
 extern pthread_mutex_t cache_lock;
+#define TLB_ENTRY_SIZE 9
 
 /* CPURNG prototypes*/
 void init_rng();

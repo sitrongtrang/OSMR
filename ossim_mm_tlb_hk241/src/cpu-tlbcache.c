@@ -23,7 +23,7 @@
 #include <pthread.h>
 
 #define init_tlbcache(mp,sz,...) init_memphy(mp, sz, (1, ##__VA_ARGS__))
-#define TLB_SIZE mp->maxsz / TLB_ENTRY_SIZE
+#define TLB_SIZE mp->maxsz/TLB_ENTRY_SIZE
 
 pthread_mutex_t cache_lock;
 
@@ -41,35 +41,35 @@ pthread_mutex_t cache_lock;
  *  @pgnum: page number
  *  @value: obtained value
  */
-int tlb_cache_read(struct memphy_struct * mp, int pid, int pgnum, BYTE *value)
+int tlb_cache_read(struct memphy_struct * mp, int pid, int pgnum, int* value)
 {
    /* TODO: the identify info is mapped to 
     *      cache line by employing:
-    *      direct mapped, associated mapping etc.
+    *      direct mapped.
     */
    pthread_mutex_lock(&cache_lock);
    int cache_idx = pgnum % TLB_SIZE;
    int base_addr = cache_idx * TLB_ENTRY_SIZE;
-   
+
+   // Extracting pid, pgnum, data from current tlb_entry
    int avail = mp->storage[base_addr];
    if ((avail & 1) == 0) return -1;
-
    int cache_pid = 0;
-   for(int j = 0; j <= 3; j++){
+   for(int j = 3; j >= 0; j--)
+   {
       cache_pid |= (mp->storage[base_addr + 4 - j] << (j * 8));
    }
-
    int cache_pgn = (mp->storage[base_addr + 5] << 8) | mp->storage[base_addr + 6];
-   int cache_data = (mp->storage[base_addr + 7] << 8) | mp->storage[base_addr + 8]; 
+   int cache_fpn = (mp->storage[base_addr + 7] << 8) | mp->storage[base_addr + 8];
+
+      if(cache_pid == pid && cache_fpn == pgnum)
+      {
+         *value = cache_fpn;
+         pthread_mutex_unlock(&cache_lock);
+         return 0;
+      }
       
-   if(cache_pid == pid && cache_pgn == pgnum){
-      *value = cache_data;
-      pthread_mutex_unlock(&cache_lock);
-      return 0;
-   }
-
    pthread_mutex_unlock(&cache_lock);
-
    return -1;
 }
 
@@ -80,30 +80,28 @@ int tlb_cache_read(struct memphy_struct * mp, int pid, int pgnum, BYTE *value)
  *  @pgnum: page number
  *  @value: obtained value
  */
-int tlb_cache_write(struct memphy_struct *mp, int pid, int pgnum, BYTE* value)
+int tlb_cache_write(struct memphy_struct *mp, int pid, int pgnum, int *value)
 {
    /* TODO: the identify info is mapped to 
     *      cache line by employing:
-    *      direct mapped, associated mapping etc.
+    *      direct mapped.
     */
    pthread_mutex_lock(&cache_lock);
    int cache_idx = pgnum % TLB_SIZE;
    int base_addr = cache_idx * TLB_ENTRY_SIZE;
-
-   for(int i = 0; i <= 3; i++){
+   for(int i = 0; i <= 3; i++)
+   {
       TLBMEMPHY_write(mp, base_addr + 4 - i, (pid >> (i * 8)) & 0xFF);
    }
-   
    TLBMEMPHY_write(mp, base_addr + 6, pgnum & 0xFF);
    TLBMEMPHY_write(mp, base_addr + 5, (pgnum >> 8) & 0xFF);
-  
+
    TLBMEMPHY_write(mp, base_addr + 8, *value & 0xFF);
    TLBMEMPHY_write(mp, base_addr + 7, (*value >> 8) & 0xFF);
    
    TLBMEMPHY_write(mp, base_addr, 1);
    
    pthread_mutex_unlock(&cache_lock);
-
    return 0;
 }
 
@@ -153,20 +151,26 @@ int TLBMEMPHY_dump(struct memphy_struct * mp)
    /*TODO dump memphy contnt mp->storage 
     *     for tracing the memory content
     */
-   if (mp == NULL) return -1;
-   for (int i = 0; i < mp->maxsz; i += TLB_ENTRY_SIZE){
+   if(mp == NULL || mp->storage == NULL)
+      return -1;
+   
+   pthread_mutex_lock(&cache_lock);
+   for(int i = 0; i < mp->maxsz; i += TLB_ENTRY_SIZE)
+   {
       int avail = mp->storage[i];
-      if ((avail & 1) == 0) continue;
-
+      if ((avail & 1) == 0)
+         continue;
       int cache_pid;
-      for(int j = 0; j <= 3; j++){
+      for(int j = 0; j <= 3; j++)
+      {
          cache_pid |= (mp->storage[i + 4 - j] << (j * 8));
       }
       int cache_pgn = (mp->storage[i + 5] << 8) | mp->storage[i + 6];
-      int cache_data = (mp->storage[i + 7] << 8) | mp->storage[i + 8]; 
-
-      printf("Entry %d:\tUsed: %d\tPID: %d\tPage: %d\tFrame: %d\n", i/TLB_ENTRY_SIZE, avail, cache_pid, cache_pgn, cache_data);
+      int cache_fpn = (mp->storage[i + 7] << 8) | mp->storage[i + 8]; 
+      printf("Entry %d:\tUsed: %d\tPID: %d\tPage: %d\tFrame: %d\n", i/TLB_ENTRY_SIZE, avail, cache_pid, cache_pgn, cache_fpn);
    }
+   
+   pthread_mutex_unlock(&cache_lock);
    return 0;
 }
 
@@ -181,6 +185,7 @@ int init_tlbmemphy(struct memphy_struct *mp, int max_size)
 
    mp->rdmflg = 1;
 
+   pthread_mutex_init(&cache_lock, NULL);
    return 0;
 }
 
